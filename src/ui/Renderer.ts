@@ -279,6 +279,92 @@ export class Renderer {
     }
   }
 
+  drawScoreCardWithPreview(name: string, categories: any[], totalScore: number, x: number, y: number, width: number, height: number, isPlayer: boolean = true, diceValues: number[] = [], scoreCalculator: ((categoryId: string, diceValues: number[]) => number) | null = null, isClickable: boolean = false): void {
+    const ctx = this.ctx;
+    const accentColor = isPlayer ? COLORS.player : COLORS.enemy;
+    
+    // Card glow - subtle ambient
+    this.drawGlow(x + width / 2, y + height / 2, width * 0.8, accentColor, 0.1);
+    
+    // Card background - glass effect
+    ctx.fillStyle = 'rgba(20, 20, 40, 0.6)';
+    this.drawRoundedRect(x, y, width, height, 12);
+    ctx.fill();
+    
+    // Inner glow border
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6;
+    this.drawRoundedRect(x + 1, y + 1, width - 2, height - 2, 11);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    
+    // Title
+    ctx.fillStyle = accentColor;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(name, x + width / 2, y + 18);
+    
+    // Total score - larger and prominent
+    ctx.fillStyle = '#f39c12';
+    ctx.font = 'bold 24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${totalScore}`, x + width / 2, y + 40);
+    
+    // Divider line
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y + 50);
+    ctx.lineTo(x + width - 10, y + 50);
+    ctx.stroke();
+    
+    // Categories - BIGGER boxes with score preview
+    const categoryHeight = (height - 60) / 15;
+    const categoryBoxHeight = Math.max(categoryHeight, 20);
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'left';
+    
+    for (let i = 0; i < categories.length; i++) {
+      const category = categories[i];
+      const categoryY = y + 55 + i * categoryHeight;
+      
+      // Category background box - darker if used
+      if (category.used) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      } else {
+        ctx.fillStyle = 'rgba(52, 152, 219, 0.1)';
+      }
+      ctx.fillRect(x + 4, categoryY - 4, width - 8, categoryBoxHeight - 2);
+      
+      // Category name
+      ctx.fillStyle = category.used ? 'rgba(255,255,255,0.35)' : '#ffffff';
+      let displayName = category.name;
+      if (displayName.length > 12) displayName = displayName.substring(0, 11) + '…';
+      ctx.fillText(displayName, x + 8, categoryY + categoryHeight * 0.65);
+      
+      // Score
+      ctx.textAlign = 'right';
+      if (category.used) {
+        // Show actual score in green or red
+        ctx.fillStyle = category.score > 0 ? '#2ecc71' : '#e74c3c';
+        ctx.font = 'bold 11px Arial';
+        ctx.fillText(category.score.toString(), x + width - 8, categoryY + categoryHeight * 0.65);
+      } else if (diceValues.length > 0 && scoreCalculator) {
+        // Show preview score
+        const previewScore = scoreCalculator(category.id, diceValues);
+        ctx.fillStyle = previewScore > 0 ? '#f39c12' : 'rgba(255,255,255,0.2)';
+        ctx.font = '11px Arial';
+        ctx.fillText(previewScore > 0 ? previewScore.toString() : '-', x + width - 8, categoryY + categoryHeight * 0.65);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.font = '11px Arial';
+        ctx.fillText('-', x + width - 8, categoryY + categoryHeight * 0.65);
+      }
+      ctx.textAlign = 'left';
+    }
+  }
+
   drawCategoryButtons(categories: any[], x: number, y: number, width: number, height: number): void {
     const ctx = this.ctx;
     // Compact category buttons for panel

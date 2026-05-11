@@ -287,19 +287,20 @@ export class Game {
     const turnColor = this.state.currentTurn === 'player' ? '#2ecc71' : '#e74c3c';
     this.renderer.drawText(turnText, CANVAS_WIDTH / 2, 75, turnColor, 20, true);
     
-    // Score cards - shorter and more compact to fit all categories
-    this.renderer.drawScoreCard('PLAYER', this.state.scoringCategories, this.state.totalScore, 30, 110, 180, 370, true);
-    this.renderer.drawScoreCard('AI', this.state.aiScoringCategories, this.state.aiTotalScore, CANVAS_WIDTH - 210, 110, 180, 370, false);
+    // Score cards - BIGGER, with live preview for current player
+    // Side boxes now take up more space with no center panel
+    const playerDiceValues = this.state.currentTurn === 'player' ? this.diceManager.getValues() : [];
+    const scoreCalculator = (categoryId: string, diceValues: number[]) => this.getCategoryPreviewScore(categoryId, diceValues);
+    const cardWidth = 240;
+    const cardHeight = 430;
+    this.renderer.drawScoreCardWithPreview('PLAYER', this.state.scoringCategories, this.state.totalScore, 20, 100, cardWidth, cardHeight, true, playerDiceValues, scoreCalculator, this.state.phase === 'scoring');
+    this.renderer.drawScoreCardWithPreview('AI', this.state.aiScoringCategories, this.state.aiTotalScore, CANVAS_WIDTH - cardWidth - 20, 100, cardWidth, cardHeight, false, [], scoreCalculator, false);
     
     // Dice area
     this.renderer.drawDice(this.state.dice, this.state.rollsRemaining, false);
     
-    // Show category panel ONLY in scoring phase
-    if (this.state.phase === 'scoring') {
-      this.renderCategoryPanel();
-      this.renderer.drawButton(CANVAS_WIDTH / 2 - 80, 520, 160, 50, 'SCORE', true, '#2ecc71');
-    } else {
-      // Rolling phase - show roll button
+    // Show roll button during rolling phase
+    if (this.state.phase !== 'scoring') {
       const canRoll = this.state.rollsRemaining > 0;
       this.renderer.drawButton(CANVAS_WIDTH / 2 - 80, 520, 160, 50, canRoll ? 'ROLL' : 'AUTO SCORE', canRoll, COLORS.accent);
     }
@@ -553,9 +554,14 @@ export class Game {
         this.state.rollsRemaining = this.diceManager.getRollsRemaining();
         // Update state dice with new values
         this.state.dice = this.diceManager.getDice();
+
+        if (this.state.rollsRemaining === 0) {
+          // Automatically enter scoring after the final roll.
+          this.state.phase = 'scoring';
+        }
       } else {
-        // No rolls left - go to scoring
-        this.state.phase = 'scoring';
+        // No rolls left - auto score the best category
+        this.autoSelectBestCategory();
       }
     }
   }
@@ -563,35 +569,29 @@ export class Game {
   private handleScoringInput(x: number, y: number): void {
     // Only handle scoring input in scoring phase
     if (this.state.phase !== 'scoring') return;
+    if (this.state.currentTurn !== 'player') return; // Player's turn only
     
-    // Check category panel clicks
-    const panelX = 250;
-    const panelY = 100;
-    const panelWidth = 480;
-    const panelHeight = 450;
+    // Check clicks on player score card (left side)
+    const cardWidth = 240;
+    const cardHeight = 430;
+    const cardY = 100;
+    const playerCardX = 20;
     
-    // Only process clicks inside the category panel
-    if (!isPointInRect(x, y, panelX, panelY, panelWidth, panelHeight)) {
-      // Clicked outside - do nothing, wait for valid selection
-      return;
-    }
-    
-    const categoryHeight = 22;
-    const startY = panelY + 35;
-    const padding = 2;
-    
-    for (let i = 0; i < this.state.scoringCategories.length; i++) {
-      const category = this.state.scoringCategories[i];
-      if (category.used) continue;
+    if (isPointInRect(x, y, playerCardX, cardY, cardWidth, cardHeight)) {
+      const categoryHeight = (cardHeight - 60) / 15;
+      const startY = cardY + 55;
       
-      const btnY = startY + i * (categoryHeight + padding);
-      if (isPointInRect(x, y, panelX + 10, btnY, panelWidth - 20, categoryHeight)) {
-        this.selectCategory(category.id);
-        return;
+      for (let i = 0; i < this.state.scoringCategories.length; i++) {
+        const category = this.state.scoringCategories[i];
+        const categoryY = startY + i * categoryHeight;
+        if (isPointInRect(x, y, playerCardX + 6, categoryY, cardWidth - 12, categoryHeight)) {
+          if (!category.used) {
+            this.selectCategory(category.id);
+          }
+          return;
+        }
       }
     }
-    
-    // Clicked inside panel but not on a category - do nothing
   }
 
   private handlePowerupSelectInput(x: number, y: number): void {
@@ -629,10 +629,10 @@ export class Game {
 
     const diceValues = this.diceManager.getValues();
     let bestCategory = availableCategories[0];
-    let bestScore = this.scoreManager.calculateScore(bestCategory.id, diceValues);
+    let bestScore = this.getCategoryPreviewScore(bestCategory.id, diceValues);
 
     availableCategories.forEach(category => {
-      const score = this.scoreManager.calculateScore(category.id, diceValues);
+      const score = this.getCategoryPreviewScore(category.id, diceValues);
       if (score > bestScore) {
         bestScore = score;
         bestCategory = category;
@@ -640,6 +640,29 @@ export class Game {
     });
 
     this.selectCategory(bestCategory.id);
+  }
+
+  private getCategoryPreviewScore(categoryId: string, diceValues: number[]): number {
+    let score = this.scoreManager.calculateScore(categoryId, diceValues as any);
+    const multiplier = (this.state as any).scoreMultiplier || 1;
+    score = Math.floor(score * multiplier);
+
+    const balancedBonus = (this.state as any).balancedBonus || 0;
+    score += balancedBonus;
+
+    const categoryMaster = (this.state as any).categoryMaster || 0;
+    score += categoryMaster;
+
+    const insurance = (this.state as any).insurance || 0;
+    if (insurance > 0 && score < insurance) {
+      score = insurance;
+    }
+
+    if ((this.state as any).safeBet && score < 10) {
+      score = 10;
+    }
+
+    return score;
   }
 
   private selectCategory(categoryId: string): void {
@@ -682,9 +705,10 @@ export class Game {
       this.state.phase = 'powerup_select';
       this.powerupOptions = this.powerupSystem.getRandomPowerups(3, this.state.usedPowerupIds);
       
-      // Clear used one-time powerups (but keep persistent ones)
-      if ((this.state as any).scoreMultiplier && !['u2', 'u3', 'r10', 'e8', 'l8'].includes((this.state as any).lastMultiplier)) {
+      // Clear one-time multipliers after they have been spent
+      if ((this.state as any).scoreMultiplier) {
         delete (this.state as any).scoreMultiplier;
+        delete (this.state as any).lastMultiplier;
       }
       // Keep balanced bonus and category master for future turns
     }
